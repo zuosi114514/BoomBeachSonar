@@ -20,5 +20,31 @@
   "use_saved_points": true,
   "ocr_enabled": true,
   "claim_rewards_when_ammo_empty": true,
-  "hit_click_interval": 1.0
+  "hit_click_interval": 1.0,
+  "instances": [
+    {
+      "slot": "slot1",
+      "enabled": true,
+      "serial": "127.0.0.1:5555",
+      "manual_level": null
+    },
+    {
+      "slot": "slot2",
+      "enabled": false,
+      "serial": "",
+      "manual_level": null
+    },
+    {
+      "slot": "slot3",
+      "enabled": false,
+      "serial": "",
+      "manual_level": null
+    },
+    {
+      "slot": "slot4",
+      "enabled": false,
+      "serial": "",
+      "manual_level": null
+    }
+  ]
 }

@@ -70,6 +70,7 @@ class MainFlowTest(unittest.TestCase):
     def _patch_enter_helpers(self, waits):
         return (
             patch.object(self.main, "wait_until_occur", side_effect=lambda *args, **kwargs: next(waits)),
+            patch.object(self.main, "wait_sonar_ready", return_value=True),
             patch.object(self.main, "skip_victory_overlay", return_value=False),
             patch.object(self.main, "find_template", return_value=None),
             patch.object(self.main, "wait_activity_detail_ready", return_value=True),
@@ -83,7 +84,7 @@ class MainFlowTest(unittest.TestCase):
             ]
         )
         patches = self._patch_enter_helpers(waits)
-        with patches[0], patches[1], patches[2], patches[3]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
             self.main.enter_activity(max_retries=2)
 
         package_name = self.main.GAME_PACKAGE_NAME
@@ -104,9 +105,10 @@ class MainFlowTest(unittest.TestCase):
         )
 
     def test_enter_activity_stops_after_max_retries(self):
-        with patch.object(self.main, "wait_until_occur", return_value=None):
-            with self.assertRaisesRegex(RuntimeError, "最大重试次数 2"):
-                self.main.enter_activity(max_retries=2)
+        with patch.object(self.main, "wait_sonar_ready", return_value=True):
+            with patch.object(self.main, "wait_until_occur", return_value=None):
+                with self.assertRaisesRegex(RuntimeError, "最大重试次数 2"):
+                    self.main.enter_activity(max_retries=2)
 
         package_name = self.main.GAME_PACKAGE_NAME
         self.assertEqual(self.adb.calls.count(("close_app", package_name)), 2)
@@ -115,7 +117,7 @@ class MainFlowTest(unittest.TestCase):
     def test_re_enter_skips_first_enter_only_actions(self):
         waits = iter([DummyMatch((30, 40))])
         patches = self._patch_enter_helpers(waits)
-        with patches[0], patches[1], patches[2], patches[3]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4]:
             self.main.enter_activity(re_enter=True, max_retries=1)
 
         package_name = self.main.GAME_PACKAGE_NAME

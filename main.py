@@ -18,7 +18,10 @@ from utils.reward_helper import refill_ammo_from_rewards
 from utils.submarine_strategy import Cell, SubmarineStrategy, get_configured_submarines
 
 logger = get_logger(__name__)
-adb = AdbController()
+# 保留旧测试/外部脚本使用的模块级别别名。
+GAME_PACKAGE_NAME = config.GAME_PACKAGE_NAME
+ACTIVITY_TAP_TO_START_POINT = config.ACTIVITY_TAP_TO_START_POINT
+adb = AdbController(auto_connect=False)
 _weak_network_cleanup_done = False
 _stop_requested = False
 
@@ -27,16 +30,34 @@ def request_stop() -> None:
     """请求主循环在下一关边界停止。"""
     global _stop_requested
     _stop_requested = True
+    if config.RUNTIME_DIR is not None:
+        stop_file = config.RUNTIME_DIR / "stop.flag"
+        stop_file.parent.mkdir(parents=True, exist_ok=True)
+        stop_file.write_text("stop\n", encoding="utf-8")
     logger.warning("已请求停止，将在当前关卡流程合适节点退出")
 
 
 def clear_stop_request() -> None:
     global _stop_requested
     _stop_requested = False
+    if config.RUNTIME_DIR is not None:
+        (config.RUNTIME_DIR / "stop.flag").unlink(missing_ok=True)
 
 
 def should_stop() -> bool:
-    return _stop_requested
+    if _stop_requested:
+        return True
+    return (
+        config.RUNTIME_DIR is not None
+        and (config.RUNTIME_DIR / "stop.flag").exists()
+    )
+
+
+def configure_adb(serial: str) -> AdbController:
+    """显式创建当前进程专用的 ADB 控制器。"""
+    global adb
+    adb = AdbController(serial)
+    return adb
 
 def enable_weak_network(second: float = 0) -> None:
     """开启游戏弱网，并按需等待网络状态生效。"""
@@ -548,7 +569,10 @@ def _ammo_is_empty() -> bool:
     """读取蓝弹药数量；为 0 返回 True。识别失败时不停止，继续跑。"""
     ammo = read_blue_ammo_count(adb.read_screenshot())
     if ammo is None:
-        logger.warning("弹药数量识别失败，继续运行（调试图见 _debug/screenshots/ammo_detect/）")
+        logger.warning(
+            "弹药数量识别失败，继续运行（调试图见 %s）",
+            config.AMMO_DETECT_DEBUG_DIR,
+        )
         return False
     logger.info("当前蓝弹药数量: %d", ammo)
     return ammo == 0
@@ -706,7 +730,7 @@ if __name__ == "__main__":
         from utils.user_settings import apply_settings
 
         settings = apply_settings()
-        adb.serial = config.ADB_SERIAL
+        configure_adb(config.ADB_SERIAL)
 
         # 有参数则手动指定关卡；否则读 settings，再否则自动识别
         if len(sys.argv) >= 2:

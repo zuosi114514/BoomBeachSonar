@@ -13,6 +13,7 @@ from utils.logger import get_logger, setup_logging
 logger = get_logger(__name__)
 
 SETTINGS_FILE = config_module.BASE_DIR / "settings.json"
+SLOT_COUNT = 4
 
 # GUI / 文档用：字段说明与类型
 SETTING_SCHEMA: list[dict[str, Any]] = [
@@ -174,6 +175,15 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "ocr_enabled": True,
     "claim_rewards_when_ammo_empty": True,
     "hit_click_interval": 1.0,
+    "instances": [
+        {
+            "slot": f"slot{index}",
+            "enabled": index == 1,
+            "serial": "127.0.0.1:5555" if index == 1 else "",
+            "manual_level": None,
+        }
+        for index in range(1, SLOT_COUNT + 1)
+    ],
 }
 
 # settings.json key -> config 模块属性名
@@ -227,7 +237,40 @@ def load_settings(path: Path | None = None) -> dict[str, Any]:
     for key in DEFAULT_SETTINGS:
         if key in raw:
             merged[key] = raw[key]
+    merged["instances"] = normalize_instances(merged.get("instances"))
     return merged
+
+
+def normalize_instances(value: Any) -> list[dict[str, Any]]:
+    """规范化为固定四槽配置，兼容旧版没有 instances 的 settings.json。"""
+    source = value if isinstance(value, list) else []
+    by_slot = {
+        str(item.get("slot")): item
+        for item in source
+        if isinstance(item, dict) and item.get("slot")
+    }
+    result: list[dict[str, Any]] = []
+    for index in range(1, SLOT_COUNT + 1):
+        slot = f"slot{index}"
+        item = by_slot.get(slot, {})
+        result.append(
+            {
+                "slot": slot,
+                "enabled": bool(item.get("enabled", index == 1)),
+                "serial": str(
+                    item.get(
+                        "serial",
+                        "127.0.0.1:5555" if index == 1 else "",
+                    )
+                ).strip(),
+                "manual_level": (
+                    int(item["manual_level"])
+                    if item.get("manual_level") not in (None, "")
+                    else None
+                ),
+            }
+        )
+    return result
 
 
 def save_settings(settings: dict[str, Any], path: Path | None = None) -> Path:
@@ -237,6 +280,7 @@ def save_settings(settings: dict[str, Any], path: Path | None = None) -> Path:
     for key in cleaned:
         if key in settings:
             cleaned[key] = settings[key]
+    cleaned["instances"] = normalize_instances(cleaned.get("instances"))
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(
         json.dumps(cleaned, ensure_ascii=False, indent=2) + "\n",

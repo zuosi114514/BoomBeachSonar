@@ -47,7 +47,13 @@ class AdbController:
         command.extend(args)
 
         logger.debug("执行 adb 命令: %s", " ".join(command))
-        result = subprocess.run(command, capture_output=True, text=True)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
         if check and device and result.returncode != 0 and self._is_recoverable_adb_error(result):
             logger.warning(
                 "ADB 连接异常，正在重连并重试: command=%s stdout=%r stderr=%r",
@@ -56,7 +62,13 @@ class AdbController:
                 _limit_text(result.stderr),
             )
             self._recover_connection()
-            result = subprocess.run(command, capture_output=True, text=True)
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
 
         if check and result.returncode != 0:
             logger.error(
@@ -418,7 +430,13 @@ class AdbController:
         self._su_available = None
         disconnect_command = ["adb", "disconnect", self.serial]
         logger.info("断开 adb 设备连接: %s", self.serial)
-        subprocess.run(disconnect_command, capture_output=True, text=True)
+        subprocess.run(
+            disconnect_command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
         sleep(0.5)
         self.connect()
         sleep(1.0)

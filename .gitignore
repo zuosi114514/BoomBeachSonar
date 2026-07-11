@@ -27,6 +27,7 @@ htmlcov/
 
 # 运行时生成物
 outputs/
+runtime/
 _debug/screenshots/
 _debug/logs/
 save_points/dbg/

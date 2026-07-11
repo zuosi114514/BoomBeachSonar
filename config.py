@@ -1,11 +1,17 @@
+import os
 from pathlib import Path
 from typing import Final
 
 # Base 路径，指向项目根目录
 BASE_DIR = Path(__file__).resolve().parent
 
+# 多实例 worker 会在导入本模块前设置这些环境变量。
+INSTANCE_ID = os.environ.get("BBMA_INSTANCE_ID", "").strip()
+_runtime_dir_text = os.environ.get("BBMA_RUNTIME_DIR", "").strip()
+RUNTIME_DIR = Path(_runtime_dir_text).resolve() if _runtime_dir_text else None
+
 # ADB 连接的默认设备 IP 地址
-ADB_SERIAL = "127.0.0.1:5555"
+ADB_SERIAL = os.environ.get("BBMA_ADB_SERIAL", "127.0.0.1:5555")
 
 # 默认控制的游戏包名（国际服；国服为 com.tencent.tmgp.supercell.boombeach）
 GAME_PACKAGE_NAME = "com.supercell.boombeach"
@@ -13,10 +19,14 @@ GAME_PACKAGE_NAME = "com.supercell.boombeach"
 
 # 模板图片目录和截图保存目录
 TEMPLATE_DIR = BASE_DIR / "template"
-SCREENSHOT_DIR = BASE_DIR / "_debug" / "screenshots"
-LOG_DIR = BASE_DIR / "_debug" / "logs"
+SCREENSHOT_DIR = (
+    RUNTIME_DIR / "screenshots"
+    if RUNTIME_DIR is not None
+    else BASE_DIR / "_debug" / "screenshots"
+)
+LOG_DIR = RUNTIME_DIR / "logs" if RUNTIME_DIR is not None else BASE_DIR / "_debug" / "logs"
 LOG_FILE = LOG_DIR / "bbma.log"
-OUTPUT_DIR = BASE_DIR / "outputs"
+OUTPUT_DIR = RUNTIME_DIR / "outputs" if RUNTIME_DIR is not None else BASE_DIR / "outputs"
 
 # 目前支持的最大关卡
 MAX_LEVEL: Final[int] = 36
