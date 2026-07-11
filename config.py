@@ -88,6 +88,12 @@ VICTORY_WAIT_TIMEOUT = 12.0
 # 进入活动后检查是否已在胜利界面的短超时（秒）
 VICTORY_CHECK_TIMEOUT = 1.2
 
+# 识别关卡标题前，等待延迟出现的胜利界面（秒）
+LEVEL_PRE_DETECT_VICTORY_TIMEOUT = 3.0
+
+# 跳过胜利后等待新关卡标题稳定（秒）
+LEVEL_AFTER_VICTORY_DELAY = 1.0
+
 # 进入活动最大重试次数
 ACTIVITY_ENTER_MAX_RETRIES = 11
 
@@ -200,9 +206,10 @@ OCR_LABEL_BLACKLIST: Final[list[str]] = [
 # 参考 save_points/imgs/1.png：蓝色鱼雷按钮上的白色数字，不为灰色弹药
 # ============================================================
 
-# 蓝弹药数字 ROI（1280x720 约 (1140,650)-(1200,705)）
+# 蓝弹药数字 ROI（1280x720 约 (1120,650)-(1200,705)）
+# 左边界留宽一些，避免三位数的百位被裁掉
 AMMO_ROI: Final[dict[str, float]] = {
-    "x1_pct": 0.891,
+    "x1_pct": 0.875,
     "y1_pct": 0.903,
     "x2_pct": 0.938,
     "y2_pct": 0.979,
@@ -232,6 +239,9 @@ REWARD_PANEL_Y2_PCT = 0.82
 
 # 单次打开奖励界面最多领取轮数
 REWARD_CLAIM_MAX_ROUNDS = 15
+
+# 探测完成后逐个点击命中格之间的间隔（秒）
+HIT_CLICK_INTERVAL = 1.0
 
 # 弹药为 0 时是否尝试领取活动奖励
 CLAIM_REWARDS_WHEN_AMMO_EMPTY = True

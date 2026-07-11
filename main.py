@@ -617,7 +617,7 @@ def _play_one_level(level: int) -> None:
             x, y = click_points[index]
             logger.warning("点击命中格 row=%d col=%d index=%d (%d, %d)", row, col, index, x, y)
             adb.click(x, y)
-            adb.delay(0.5)
+            adb.delay(config.HIT_CLICK_INTERVAL)
     logger.info("命中格点击完成，共 %d 个", total_hits)
 
     if skip_victory_overlay(timeout=config.VICTORY_WAIT_TIMEOUT):
@@ -628,6 +628,21 @@ def ensure_game_started() -> None:
     """脚本启动时确保游戏在跑：未启动则启动，已启动则重启。"""
     logger.info("脚本启动：强制重启游戏（未运行则启动）...")
     _restart_game_for_activity_retry()
+
+
+def prepare_level_detection() -> None:
+    """在截图识别关卡前处理延迟出现的胜利界面，并等待新标题稳定。"""
+    logger.info(
+        "识别关卡前检查延迟胜利界面，等待 %.1f 秒...",
+        config.LEVEL_PRE_DETECT_VICTORY_TIMEOUT,
+    )
+    if skip_victory_overlay(timeout=config.LEVEL_PRE_DETECT_VICTORY_TIMEOUT):
+        logger.info(
+            "已跳过延迟胜利界面，等待新关卡稳定 %.1f 秒...",
+            config.LEVEL_AFTER_VICTORY_DELAY,
+        )
+        wait_activity_detail_ready(timeout=config.ACTIVITY_DETAIL_READY_TIMEOUT)
+        adb.delay(config.LEVEL_AFTER_VICTORY_DELAY)
 
 
 def main(level: int | None = None):
@@ -653,6 +668,9 @@ def main(level: int | None = None):
             if _try_refill_or_stop(round_index - 1):
                 break
             continue
+
+        # 必须紧贴关卡截图执行，防止识别旧关卡后胜利界面才延迟出现。
+        prepare_level_detection()
 
         if manual_level is not None and round_index == 1:
             current_level = manual_level

@@ -9,6 +9,8 @@
   "retry_button_timeout": 20.0,
   "victory_wait_timeout": 12.0,
   "victory_check_timeout": 1.2,
+  "level_pre_detect_victory_timeout": 3.0,
+  "level_after_victory_delay": 1.0,
   "login_wait_timeout": 10.0,
   "game_restart_load_delay": 30.0,
   "sonar_not_found_restart_delay": 15.0,
@@ -17,5 +19,6 @@
   "match_threshold": 0.85,
   "use_saved_points": true,
   "ocr_enabled": true,
-  "claim_rewards_when_ammo_empty": true
+  "claim_rewards_when_ammo_empty": true,
+  "hit_click_interval": 1.0
 }

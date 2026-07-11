@@ -78,6 +78,18 @@ SETTING_SCHEMA: list[dict[str, Any]] = [
         "group": "等待时间",
     },
     {
+        "key": "level_pre_detect_victory_timeout",
+        "label": "识别关卡前等待延迟胜利（秒）",
+        "type": "float",
+        "group": "等待时间",
+    },
+    {
+        "key": "level_after_victory_delay",
+        "label": "跳过胜利后关卡稳定等待（秒）",
+        "type": "float",
+        "group": "等待时间",
+    },
+    {
         "key": "login_wait_timeout",
         "label": "等待登录按钮超时（秒）",
         "type": "float",
@@ -131,6 +143,12 @@ SETTING_SCHEMA: list[dict[str, Any]] = [
         "type": "bool",
         "group": "识别",
     },
+    {
+        "key": "hit_click_interval",
+        "label": "点击命中格间隔（秒）",
+        "type": "float",
+        "group": "流程",
+    },
 ]
 
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -144,6 +162,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "retry_button_timeout": 20.0,
     "victory_wait_timeout": 12.0,
     "victory_check_timeout": 1.2,
+    "level_pre_detect_victory_timeout": 3.0,
+    "level_after_victory_delay": 1.0,
     "login_wait_timeout": 10.0,
     "game_restart_load_delay": 30.0,
     "sonar_not_found_restart_delay": 15.0,
@@ -153,6 +173,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "use_saved_points": True,
     "ocr_enabled": True,
     "claim_rewards_when_ammo_empty": True,
+    "hit_click_interval": 1.0,
 }
 
 # settings.json key -> config 模块属性名
@@ -166,6 +187,8 @@ _CONFIG_MAP: dict[str, str] = {
     "retry_button_timeout": "RETRY_BUTTON_TIMEOUT",
     "victory_wait_timeout": "VICTORY_WAIT_TIMEOUT",
     "victory_check_timeout": "VICTORY_CHECK_TIMEOUT",
+    "level_pre_detect_victory_timeout": "LEVEL_PRE_DETECT_VICTORY_TIMEOUT",
+    "level_after_victory_delay": "LEVEL_AFTER_VICTORY_DELAY",
     "login_wait_timeout": "LOGIN_WAIT_TIMEOUT",
     "game_restart_load_delay": "GAME_RESTART_LOAD_DELAY",
     "sonar_not_found_restart_delay": "SONAR_NOT_FOUND_RESTART_DELAY",
@@ -175,6 +198,7 @@ _CONFIG_MAP: dict[str, str] = {
     "use_saved_points": "USE_SAVED_POINTS",
     "ocr_enabled": "OCR_ENABLED",
     "claim_rewards_when_ammo_empty": "CLAIM_REWARDS_WHEN_AMMO_EMPTY",
+    "hit_click_interval": "HIT_CLICK_INTERVAL",
 }
 
 
@@ -237,12 +261,15 @@ def apply_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             "retry_button_timeout",
             "victory_wait_timeout",
             "victory_check_timeout",
+            "level_pre_detect_victory_timeout",
+            "level_after_victory_delay",
             "login_wait_timeout",
             "game_restart_load_delay",
             "sonar_not_found_restart_delay",
             "sonar_wait_timeout",
             "reenter_activity_delay",
             "match_threshold",
+            "hit_click_interval",
         }:
             value = float(value)
         elif key == "manual_level":
