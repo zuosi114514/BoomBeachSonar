@@ -1,0 +1,21 @@
+{
+  "adb_serial": "127.0.0.1:5555",
+  "game_package_name": "com.supercell.boombeach",
+  "log_level": "INFO",
+  "manual_level": null,
+  "activity_button_timeout": 20.0,
+  "activity_detail_ready_timeout": 15.0,
+  "probe_detail_ready_timeout": 6.0,
+  "retry_button_timeout": 20.0,
+  "victory_wait_timeout": 12.0,
+  "victory_check_timeout": 1.2,
+  "login_wait_timeout": 10.0,
+  "game_restart_load_delay": 30.0,
+  "sonar_not_found_restart_delay": 15.0,
+  "sonar_wait_timeout": 60.0,
+  "reenter_activity_delay": 17.0,
+  "match_threshold": 0.85,
+  "use_saved_points": true,
+  "ocr_enabled": true,
+  "claim_rewards_when_ammo_empty": true
+}
