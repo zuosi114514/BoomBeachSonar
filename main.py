@@ -506,6 +506,11 @@ def handle_game_level(level: int, hit_map: list[list[int]]) -> tuple[np.ndarray,
     click_points, grid_quad = get_click_points(level, grid_img)
     submarines = get_configured_submarines(level, config.SUBMARINES)
 
+    # 上一关统一点击命中格前会关闭弱网；新关开始探测前必须重新开启，
+    # 否则首个未命中点击会真实消耗一颗弹药。
+    logger.info("第 %s 关探测前开启弱网保护", level)
+    enable_weak_network(0.2)
+
     if submarines is None:
         logger.warning("没有潜艇配置，按顺序逐格扫描 level %d", level)
         _scan_level_by_grid_order(level, hit_map, click_points)
