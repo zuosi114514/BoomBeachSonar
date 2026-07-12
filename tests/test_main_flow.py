@@ -173,6 +173,27 @@ class MainFlowTest(unittest.TestCase):
         self.assertTrue(ready)
         skip.assert_called()
 
+    def test_click_hits_retries_when_victory_missing(self):
+        """首次点击后未出现胜利界面时，应重试统一点击一次。"""
+        hit_map = [[1, 0], [0, 1]]
+        click_points = [(10, 20), (30, 40), (50, 60), (70, 80)]
+        wait_calls = {"n": 0}
+
+        def fake_skip_victory(timeout=0, max_rounds=3):
+            if timeout > 0:
+                wait_calls["n"] += 1
+                return wait_calls["n"] == 2
+            return False
+
+        with patch.object(self.main, "skip_victory_overlay", side_effect=fake_skip_victory):
+            self.main._click_hits_and_wait_victory(hit_map, 2, click_points, total_hits=2)
+
+        click_coords = [call for call in self.adb.calls if call[:1] == ("click",)]
+        self.assertEqual(len(click_coords), 4)
+        self.assertEqual(wait_calls["n"], 2)
+        self.assertIn(("click", 10, 20), click_coords)
+        self.assertIn(("click", 70, 80), click_coords)
+
 
 if __name__ == "__main__":
     unittest.main()

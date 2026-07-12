@@ -636,6 +636,62 @@ def _try_refill_or_stop(round_index: int) -> bool:
     return False
 
 
+def _click_hit_cells(
+    hit_map: list[list[int]],
+    grid_size: int,
+    click_points: list[tuple[int, int]],
+    *,
+    round_label: str = "",
+) -> int:
+    """统一点击所有命中格。返回实际点击数量。"""
+    clicked = 0
+    label_suffix = f" ({round_label})" if round_label else ""
+    for row in range(grid_size):
+        for col in range(grid_size):
+            if hit_map[row][col] != 1:
+                continue
+            skip_victory_overlay()
+            index = row * grid_size + col
+            x, y = click_points[index]
+            logger.warning(
+                "点击命中格 row=%d col=%d index=%d (%d, %d)%s",
+                row,
+                col,
+                index,
+                x,
+                y,
+                label_suffix,
+            )
+            adb.click(x, y)
+            adb.delay(config.HIT_CLICK_INTERVAL)
+            clicked += 1
+    return clicked
+
+
+def _click_hits_and_wait_victory(
+    hit_map: list[list[int]],
+    grid_size: int,
+    click_points: list[tuple[int, int]],
+    total_hits: int,
+) -> None:
+    """统一点击命中格，等待胜利；未出现则重试点击一次。"""
+    _click_hit_cells(hit_map, grid_size, click_points)
+    logger.info("命中格点击完成，共 %d 个", total_hits)
+
+    if skip_victory_overlay(timeout=config.VICTORY_WAIT_TIMEOUT):
+        logger.info("本阶段胜利，已进入下一阶段")
+        return
+
+    logger.warning("点击命中格后未出现胜利界面，重新统一点击一次...")
+    _click_hit_cells(hit_map, grid_size, click_points, round_label="重试")
+    logger.info("命中格重试点击完成，共 %d 个", total_hits)
+
+    if skip_victory_overlay(timeout=config.VICTORY_WAIT_TIMEOUT):
+        logger.info("重试点击后本阶段胜利，已进入下一阶段")
+    else:
+        logger.warning("重试点击后仍未出现胜利界面，关卡可能未完成")
+
+
 def _play_one_level(level: int) -> None:
     """完成单关：探测命中 → 点命中格 → 等待胜利进入下一阶段。"""
     grid_size = get_level_grid_size(level)
@@ -654,20 +710,7 @@ def _play_one_level(level: int) -> None:
     logger.info("共 %d 个命中格，开始点击命中格子...", total_hits)
     disable_weak_network(0.2)
     skip_victory_overlay()
-    for row in range(grid_size):
-        for col in range(grid_size):
-            if hit_map[row][col] != 1:
-                continue
-            skip_victory_overlay()
-            index = row * grid_size + col
-            x, y = click_points[index]
-            logger.warning("点击命中格 row=%d col=%d index=%d (%d, %d)", row, col, index, x, y)
-            adb.click(x, y)
-            adb.delay(config.HIT_CLICK_INTERVAL)
-    logger.info("命中格点击完成，共 %d 个", total_hits)
-
-    if skip_victory_overlay(timeout=config.VICTORY_WAIT_TIMEOUT):
-        logger.info("本阶段胜利，已进入下一阶段")
+    _click_hits_and_wait_victory(hit_map, grid_size, click_points, total_hits)
 
 
 def ensure_game_started() -> None:
