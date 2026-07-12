@@ -34,6 +34,12 @@ class FakeAdb:
         self.calls.append(("swipe", start_x, start_y, end_x, end_y))
         return self
 
+    def drag(self, start_x, start_y, end_x, end_y, duration_ms=800):
+        self.calls.append(
+            ("drag", start_x, start_y, end_x, end_y, duration_ms)
+        )
+        return self
+
     def enable_weak_network(self, package_name):
         self.calls.append(("enable_weak_network", package_name))
 
@@ -126,6 +132,26 @@ class MainFlowTest(unittest.TestCase):
         self.assertIn(("click", 30, 40), self.adb.calls)
         self.assertIn(("click", 1205, 644), self.adb.calls)
         self.assertIn(("click", *self.main.ACTIVITY_TAP_TO_START_POINT), self.adb.calls)
+
+    def test_cn_restart_clicks_login_island(self):
+        package_name = "com.tencent.tmgp.supercell.boombeach"
+        with patch.object(self.main.config, "GAME_REGION", "cn"):
+            with patch.object(self.main.config, "GAME_PACKAGE_NAME", package_name):
+                with patch.object(self.main.config, "LOGIN_WAIT_TIMEOUT", 4.0):
+                    self.main._restart_game_for_activity_retry(load_delay=1.0)
+
+        self.assertIn(("close_app", package_name), self.adb.calls)
+        self.assertIn(("open_app", package_name), self.adb.calls)
+        self.assertIn(
+            ("click", *self.main.config.CN_LOGIN_ISLAND_POINT),
+            self.adb.calls,
+        )
+        self.assertIn(("delay", 4.0), self.adb.calls)
+
+    def test_home_swipe_uses_configured_slow_duration(self):
+        with patch.object(self.main.config, "HOME_SWIPE_DURATION_MS", 800):
+            self.main.swipe_home_up(300)
+        self.assertIn(("drag", 640, 500, 640, 200, 800), self.adb.calls)
 
     def test_wait_activity_detail_ready_skips_victory(self):
         """胜利遮罩下应先跳过胜利，再视为详情就绪。"""

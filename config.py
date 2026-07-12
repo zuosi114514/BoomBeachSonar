@@ -13,9 +13,18 @@ RUNTIME_DIR = Path(_runtime_dir_text).resolve() if _runtime_dir_text else None
 # ADB 连接的默认设备 IP 地址
 ADB_SERIAL = os.environ.get("BBMA_ADB_SERIAL", "127.0.0.1:5555")
 
-# 默认控制的游戏包名（国际服；国服为 com.tencent.tmgp.supercell.boombeach）
-GAME_PACKAGE_NAME = "com.supercell.boombeach"
-#GAME_PACKAGE_NAME = "com.tencent.tmgp.supercell.boombeach"
+# 游戏版本与包名
+INTERNATIONAL_GAME_PACKAGE = "com.supercell.boombeach"
+CN_GAME_PACKAGE = "com.tencent.tmgp.supercell.boombeach"
+GAME_REGION = os.environ.get("BBMA_GAME_REGION", "international")
+GAME_PACKAGE_NAME = (
+    CN_GAME_PACKAGE
+    if GAME_REGION == "cn"
+    else INTERNATIONAL_GAME_PACKAGE
+)
+
+# 国服启动页「登陆岛屿」按钮固定点击点（1280x720）
+CN_LOGIN_ISLAND_POINT: Final[tuple[int, int]] = (640, 595)
 
 # 模板图片目录和截图保存目录
 TEMPLATE_DIR = BASE_DIR / "template"
@@ -130,6 +139,9 @@ SONAR_WAIT_TIMEOUT = 60.0
 
 # 主岛上划像素（手指上移，露出海边声纳）
 HOME_SWIPE_UP_PIXELS = 300
+
+# 主岛上划持续时间（毫秒）；增大后滑动更慢
+HOME_SWIPE_DURATION_MS = 800
 
 # 声纳「参加」浮标模板
 SONAR_TEMPLATE = "./template/sonar_join.png"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -16,6 +17,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Any
+
+import cv2
+import numpy as np
 
 from utils.logger import GuiLogFormatter, attach_log_handler, detach_log_handler, get_logger
 from utils.runtime_context import (
@@ -35,12 +39,15 @@ from utils.user_settings import (
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+BACKGROUND_IMAGE = PROJECT_ROOT / "assets" / "app_background.png"
 logger = get_logger(__name__)
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 _LEVEL_RE = re.compile(r"(?:自动识别关卡|使用手动指定关卡):\s*(\d+)")
 _AMMO_RE = re.compile(r"当前蓝弹药数量:\s*(\d+)")
 _STATUS_PREFIX = "@@BBMA_STATUS "
 _MAX_LOG_LINES = 5000
+_REGION_TO_LABEL = {"international": "国际服", "cn": "国服"}
+_LABEL_TO_REGION = {label: region for region, label in _REGION_TO_LABEL.items()}
 
 
 class ManagerLogHandler(logging.Handler):
@@ -75,6 +82,16 @@ class App(tk.Tk):
         self.geometry("1380x820")
         self.minsize(1120, 680)
 
+        self._background_source = cv2.imread(str(BACKGROUND_IMAGE))
+        self._background_photo: tk.PhotoImage | None = None
+        self._surface_panel_photos: dict[tk.Label, tk.PhotoImage] = {}
+        self._surface_panels: list[tuple[tk.Label, tk.Widget]] = []
+        self._background_resize_job: str | None = None
+        self._background_label = tk.Label(self, borderwidth=0, highlightthickness=0)
+        self._background_label.place(x=0, y=0, relwidth=1, relheight=1)
+        self._log_visibility = tk.StringVar(value="隐藏日志")
+        self._logs_visible = True
+
         self.settings = load_settings()
         self.workers: dict[str, WorkerProcess] = {}
         self.device_list: list[str] = []
@@ -88,6 +105,9 @@ class App(tk.Tk):
         self._log_views: dict[str, tk.Text] = {}
 
         self._build_ui()
+        self._toggle_logs()
+        self.bind("<Configure>", self._on_window_resize)
+        self.after_idle(self._render_background)
         attach_log_handler(self._manager_handler)
         self._load_settings_into_ui()
         self.after(100, self._drain_logs)
@@ -99,7 +119,17 @@ class App(tk.Tk):
     # ---------- UI ----------
 
     def _build_ui(self) -> None:
-        toolbar = ttk.Frame(self, padding=(8, 8, 8, 4))
+        self.content_panel = tk.Frame(self, borderwidth=0, highlightthickness=0)
+        self.content_panel.pack(fill=tk.X, padx=28, pady=(24, 0))
+        content_background = tk.Label(
+            self.content_panel,
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        content_background.place(x=0, y=0, relwidth=1, relheight=1)
+        self._surface_panels.append((content_background, self.content_panel))
+
+        toolbar = ttk.Frame(self.content_panel, padding=(8, 8, 8, 4))
         toolbar.pack(fill=tk.X)
         ttk.Button(toolbar, text="刷新设备", command=self.refresh_devices).pack(side=tk.LEFT, padx=3)
         ttk.Button(toolbar, text="保存配置", command=self.save_all_settings).pack(side=tk.LEFT, padx=3)
@@ -107,26 +137,45 @@ class App(tk.Tk):
         ttk.Button(toolbar, text="全部停止", command=self.stop_all).pack(side=tk.LEFT, padx=3)
         self.device_summary = ttk.Label(toolbar, text="ADB 设备：未刷新")
         self.device_summary.pack(side=tk.RIGHT, padx=8)
+        log_selector = ttk.Combobox(
+            toolbar,
+            textvariable=self._log_visibility,
+            values=("显示日志", "隐藏日志"),
+            state="readonly",
+            width=9,
+        )
+        log_selector.pack(side=tk.RIGHT, padx=5)
+        log_selector.bind("<<ComboboxSelected>>", self._toggle_logs)
+        ttk.Label(toolbar, text="日志：").pack(side=tk.RIGHT)
 
-        paned = ttk.Panedwindow(self, orient=tk.HORIZONTAL)
-        paned.pack(fill=tk.BOTH, expand=True, padx=8, pady=(4, 8))
+        self.main_paned = ttk.Panedwindow(self.content_panel, orient=tk.HORIZONTAL)
+        self.main_paned.pack(fill=tk.X, padx=8, pady=(4, 8))
+        self.main_paned.configure(height=520)
 
-        left_notebook = ttk.Notebook(paned)
-        paned.add(left_notebook, weight=3)
+        left_notebook = ttk.Notebook(self.main_paned)
+        self.main_paned.add(left_notebook, weight=3)
 
-        devices_page = ttk.Frame(left_notebook, padding=6)
+        devices_page = tk.Frame(left_notebook, borderwidth=0, highlightthickness=0)
+        devices_background = tk.Label(
+            devices_page,
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        devices_background.place(x=0, y=0, relwidth=1, relheight=1)
+        self._surface_panels.append((devices_background, devices_page))
         settings_page = ttk.Frame(left_notebook, padding=6)
         left_notebook.add(devices_page, text="设备总控")
         left_notebook.add(settings_page, text="全局设置")
 
         for index in range(1, SLOT_COUNT + 1):
             self._build_slot_card(devices_page, f"slot{index}", index)
+        devices_background.lower()
 
         self._build_global_settings(settings_page)
 
-        logs_frame = ttk.Frame(paned)
-        paned.add(logs_frame, weight=4)
-        self.logs_notebook = ttk.Notebook(logs_frame)
+        self.logs_frame = ttk.Frame(self.main_paned)
+        self.main_paned.add(self.logs_frame, weight=4)
+        self.logs_notebook = ttk.Notebook(self.logs_frame)
         self.logs_notebook.pack(fill=tk.BOTH, expand=True)
         for key, title in [("all", "全部"), ("manager", "总控")] + [
             (f"slot{i}", f"槽位{i}") for i in range(1, SLOT_COUNT + 1)
@@ -147,15 +196,119 @@ class App(tk.Tk):
             self.logs_notebook.add(page, text=title)
             self._log_views[key] = text
 
-        bottom = ttk.Frame(logs_frame)
+        bottom = ttk.Frame(self.logs_frame)
         bottom.pack(fill=tk.X, pady=(4, 0))
         ttk.Button(bottom, text="清空当前日志", command=self._clear_current_log).pack(side=tk.RIGHT)
+        content_background.lower()
+
+    def _toggle_logs(self, _event: tk.Event | None = None) -> None:
+        should_show = self._log_visibility.get() == "显示日志"
+        if should_show and not self._logs_visible:
+            self.main_paned.add(self.logs_frame, weight=4)
+            self.main_paned.configure(height=520)
+            self._logs_visible = True
+        elif not should_show and self._logs_visible:
+            self.main_paned.forget(self.logs_frame)
+            self.main_paned.configure(height=520)
+            self._logs_visible = False
+
+    def _on_window_resize(self, event: tk.Event) -> None:
+        if event.widget is not self:
+            return
+        if self._background_resize_job is not None:
+            self.after_cancel(self._background_resize_job)
+        self._background_resize_job = self.after(100, self._render_background)
+
+    def _render_background(self) -> None:
+        self._background_resize_job = None
+        width = max(1, self.winfo_width())
+        height = max(1, self.winfo_height())
+        if self._background_source is None:
+            self._background_label.configure(bg="#d8ece8")
+            return
+
+        faded_image = self._make_faded_image(
+            width,
+            height,
+            opacity=0.34,
+            cover=True,
+        )
+        self._background_photo = self._photo_from_image(faded_image)
+        if self._background_photo is not None:
+            self._background_label.configure(image=self._background_photo)
+
+        root_x = self.winfo_rootx()
+        root_y = self.winfo_rooty()
+        for label, panel in self._surface_panels:
+            panel_width = max(1, panel.winfo_width())
+            panel_height = max(1, panel.winfo_height())
+            x1 = max(0, panel.winfo_rootx() - root_x)
+            y1 = max(0, panel.winfo_rooty() - root_y)
+            x2 = min(width, x1 + panel_width)
+            y2 = min(height, y1 + panel_height)
+            if x2 <= x1 or y2 <= y1:
+                continue
+            cropped = faded_image[y1:y2, x1:x2]
+            photo = self._photo_from_image(cropped)
+            if photo is not None:
+                self._surface_panel_photos[label] = photo
+                label.configure(image=photo)
+
+    def _make_faded_image(
+        self,
+        width: int,
+        height: int,
+        *,
+        opacity: float,
+        cover: bool = False,
+    ) -> np.ndarray:
+        source = self._background_source
+        if source is None:
+            return np.full((height, width, 3), (236, 244, 242), dtype=np.uint8)
+        source_height, source_width = source.shape[:2]
+        scale = (
+            max(width / source_width, height / source_height)
+            if cover
+            else min(width / source_width, height / source_height)
+        )
+        target_width = max(1, int(round(source_width * scale)))
+        target_height = max(1, int(round(source_height * scale)))
+        resized = cv2.resize(
+            source,
+            (target_width, target_height),
+            interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR,
+        )
+        if cover:
+            y1 = max(0, (target_height - height) // 2)
+            x1 = max(0, (target_width - width) // 2)
+            full_image = resized[y1:y1 + height, x1:x1 + width]
+        else:
+            full_image = np.full((height, width, 3), (236, 244, 242), dtype=np.uint8)
+            y1 = max(0, (height - target_height) // 2)
+            x1 = max(0, (width - target_width) // 2)
+            full_image[y1:y1 + target_height, x1:x1 + target_width] = resized
+        return cv2.addWeighted(
+            full_image,
+            opacity,
+            np.full_like(full_image, 255),
+            1.0 - opacity,
+            0,
+        )
+
+    @staticmethod
+    def _photo_from_image(image: np.ndarray) -> tk.PhotoImage | None:
+        ok, encoded = cv2.imencode(".png", image)
+        if not ok:
+            return None
+        data = base64.b64encode(encoded.tobytes()).decode("ascii")
+        return tk.PhotoImage(data=data, format="png")
 
     def _build_slot_card(self, parent: ttk.Frame, slot: str, index: int) -> None:
         card = ttk.LabelFrame(parent, text=f"槽位 {index}", padding=8)
         card.pack(fill=tk.X, padx=3, pady=5)
 
         enabled = tk.BooleanVar(value=index == 1)
+        game_region = tk.StringVar(value="国际服")
         serial = tk.StringVar()
         manual_level = tk.StringVar()
         state = tk.StringVar(value="已停止")
@@ -164,6 +317,7 @@ class App(tk.Tk):
         elapsed = tk.StringVar(value="00:00:00")
         self._slot_vars[slot] = {
             "enabled": enabled,
+            "game_region": game_region,
             "serial": serial,
             "manual_level": manual_level,
             "state": state,
@@ -173,29 +327,37 @@ class App(tk.Tk):
         }
 
         ttk.Checkbutton(card, text="启用", variable=enabled).grid(row=0, column=0, padx=4)
-        ttk.Label(card, text="ADB：").grid(row=0, column=1, sticky=tk.E)
-        serial_box = ttk.Combobox(card, textvariable=serial, width=23)
-        serial_box.grid(row=0, column=2, sticky=tk.EW, padx=4)
-        ttk.Label(card, text="指定关卡：").grid(row=0, column=3, sticky=tk.E)
-        ttk.Entry(card, textvariable=manual_level, width=8).grid(row=0, column=4, padx=4)
+        ttk.Label(card, text="版本：").grid(row=0, column=1, sticky=tk.E)
+        ttk.Combobox(
+            card,
+            textvariable=game_region,
+            values=("国际服", "国服"),
+            state="readonly",
+            width=7,
+        ).grid(row=0, column=2, padx=4)
+        ttk.Label(card, text="ADB：").grid(row=0, column=3, sticky=tk.E)
+        serial_box = ttk.Combobox(card, textvariable=serial, width=20)
+        serial_box.grid(row=0, column=4, sticky=tk.EW, padx=4)
+        ttk.Label(card, text="指定关卡：").grid(row=0, column=5, sticky=tk.E)
+        ttk.Entry(card, textvariable=manual_level, width=7).grid(row=0, column=6, padx=4)
 
         ttk.Label(card, text="状态：").grid(row=1, column=0, sticky=tk.E, pady=(7, 0))
         ttk.Label(card, textvariable=state, width=13).grid(row=1, column=1, sticky=tk.W, pady=(7, 0))
-        ttk.Label(card, text="关卡：").grid(row=1, column=2, sticky=tk.E, pady=(7, 0))
-        ttk.Label(card, textvariable=level, width=5).grid(row=1, column=3, sticky=tk.W, pady=(7, 0))
-        ttk.Label(card, text="弹药：").grid(row=1, column=4, sticky=tk.E, pady=(7, 0))
-        ttk.Label(card, textvariable=ammo, width=5).grid(row=1, column=5, sticky=tk.W, pady=(7, 0))
-        ttk.Label(card, text="时间：").grid(row=1, column=6, sticky=tk.E, pady=(7, 0))
-        ttk.Label(card, textvariable=elapsed, width=10).grid(row=1, column=7, sticky=tk.W, pady=(7, 0))
+        ttk.Label(card, text="关卡：").grid(row=1, column=3, sticky=tk.E, pady=(7, 0))
+        ttk.Label(card, textvariable=level, width=5).grid(row=1, column=4, sticky=tk.W, pady=(7, 0))
+        ttk.Label(card, text="弹药：").grid(row=1, column=5, sticky=tk.E, pady=(7, 0))
+        ttk.Label(card, textvariable=ammo, width=5).grid(row=1, column=6, sticky=tk.W, pady=(7, 0))
+        ttk.Label(card, text="时间：").grid(row=1, column=7, sticky=tk.E, pady=(7, 0))
+        ttk.Label(card, textvariable=elapsed, width=10).grid(row=1, column=8, sticky=tk.W, pady=(7, 0))
 
         start_btn = ttk.Button(card, text="启动", command=lambda s=slot: self.start_slot(s))
         stop_btn = ttk.Button(card, text="停止", command=lambda s=slot: self.stop_slot(s))
         restart_btn = ttk.Button(card, text="重启", command=lambda s=slot: self.restart_slot(s))
-        start_btn.grid(row=0, column=5, padx=3)
-        stop_btn.grid(row=0, column=6, padx=3)
-        restart_btn.grid(row=0, column=7, padx=3)
+        start_btn.grid(row=0, column=7, padx=3)
+        stop_btn.grid(row=0, column=8, padx=3)
+        restart_btn.grid(row=0, column=9, padx=3)
         stop_btn.state(["disabled"])
-        card.columnconfigure(2, weight=1)
+        card.columnconfigure(4, weight=1)
         self._slot_widgets[slot] = {
             "serial_box": serial_box,
             "start": start_btn,
@@ -219,7 +381,7 @@ class App(tk.Tk):
         groups: dict[str, ttk.LabelFrame] = {}
         rows: dict[str, int] = {}
         for item in SETTING_SCHEMA:
-            if item["key"] in {"adb_serial", "manual_level"}:
+            if item["key"] in {"adb_serial", "game_package_name", "manual_level"}:
                 continue
             group = item["group"]
             if group not in groups:
@@ -272,6 +434,9 @@ class App(tk.Tk):
             slot = item["slot"]
             variables = self._slot_vars[slot]
             variables["enabled"].set(item["enabled"])
+            variables["game_region"].set(
+                _REGION_TO_LABEL.get(item["game_region"], "国际服")
+            )
             variables["serial"].set(item["serial"])
             variables["manual_level"].set(
                 "" if item["manual_level"] is None else str(item["manual_level"])
@@ -304,6 +469,10 @@ class App(tk.Tk):
                 {
                     "slot": slot,
                     "enabled": bool(variables["enabled"].get()),
+                    "game_region": _LABEL_TO_REGION.get(
+                        str(variables["game_region"].get()),
+                        "international",
+                    ),
                     "serial": str(variables["serial"].get()).strip(),
                     "manual_level": int(level_text) if level_text else None,
                 }
@@ -414,6 +583,11 @@ class App(tk.Tk):
             str(runtime.root),
             "--settings",
             str(PROJECT_ROOT / "settings.json"),
+            "--game-region",
+            _LABEL_TO_REGION.get(
+                str(variables["game_region"].get()),
+                "international",
+            ),
         ]
         level_text = str(variables["manual_level"].get()).strip()
         if level_text:

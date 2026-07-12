@@ -7,6 +7,7 @@ import cv2
 
 from config import ADB_SERIAL, DEFAULT_SCREENSHOT_NAME, SCREENSHOT_DIR
 from utils.logger import get_logger
+from utils.runtime_context import interruptible_sleep
 
 
 logger = get_logger(__name__)
@@ -468,7 +469,7 @@ class AdbController:
         seconds = float(seconds)
         if seconds < 0:
             _raise_value_error(f"seconds 不能小于 0: {seconds}")
-        sleep(seconds)
+        interruptible_sleep(seconds)
         return self
 
     @staticmethod

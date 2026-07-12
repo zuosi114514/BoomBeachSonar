@@ -3,7 +3,6 @@ import sys
 import signal
 import time
 from pathlib import Path
-from time import sleep
 
 import cv2
 import numpy as np
@@ -15,6 +14,7 @@ from utils.diamond_centers import detect_diamond_centers, write_image
 from utils.logger import get_run_elapsed_text, mark_run_start
 from utils.ocr_helper import detect_activity_level, read_blue_ammo_count
 from utils.reward_helper import refill_ammo_from_rewards
+from utils.runtime_context import interruptible_sleep
 from utils.submarine_strategy import Cell, SubmarineStrategy, get_configured_submarines
 
 logger = get_logger(__name__)
@@ -63,13 +63,13 @@ def enable_weak_network(second: float = 0) -> None:
     """开启游戏弱网，并按需等待网络状态生效。"""
     adb.enable_weak_network(config.GAME_PACKAGE_NAME)
     if second > 0:
-        sleep(second)
+        interruptible_sleep(second)
 
 def disable_weak_network(second: float = 0) -> None:
     """关闭游戏弱网，并按需等待网络状态恢复。"""
     adb.disable_weak_network(config.GAME_PACKAGE_NAME)
     if second > 0:
-        sleep(second)
+        interruptible_sleep(second)
 
 def cleanup_weak_network(reason: str = "脚本退出") -> None:
     """脚本退出时关闭游戏弱网，防止影响游戏正常运行。"""
@@ -117,7 +117,7 @@ def wait_until_occur(
         match_result = find_template(screenshot, template_path, threshold=threshold)
         if match_result is not None:
             return match_result
-        sleep(0.5)
+        interruptible_sleep(0.5)
     logger.warning("等待模板 '%s' 超时 (%s 秒)", template_path, timeout)
     return None
 
@@ -137,6 +137,14 @@ def _restart_game_for_activity_retry(load_delay: float | None = None) -> None:
     cleanup_reject_network()
     adb.close_app(config.GAME_PACKAGE_NAME)
     adb.delay(1.5).open_app(config.GAME_PACKAGE_NAME)
+    if config.GAME_REGION == "cn":
+        logger.info(
+            "国服启动：等待 %.1f 秒后点击「登陆岛屿」...",
+            config.LOGIN_WAIT_TIMEOUT,
+        )
+        adb.delay(config.LOGIN_WAIT_TIMEOUT)
+        adb.click(*config.CN_LOGIN_ISLAND_POINT)
+        logger.info("已点击国服「登陆岛屿」: %s", config.CN_LOGIN_ISLAND_POINT)
     logger.info("游戏已重启，等待 %s 秒加载...", delay)
     adb.delay(delay)
 
@@ -147,8 +155,17 @@ def swipe_home_up(pixels: int | None = None) -> None:
     x = 640
     start_y = 500
     end_y = max(50, start_y - distance)
-    logger.info("主岛上划 %s 像素: (%s,%s)->(%s,%s)", distance, x, start_y, x, end_y)
-    adb.swipe(x, start_y, x, end_y)
+    duration_ms = int(config.HOME_SWIPE_DURATION_MS)
+    logger.info(
+        "主岛上划 %s 像素，持续 %s 毫秒: (%s,%s)->(%s,%s)",
+        distance,
+        duration_ms,
+        x,
+        start_y,
+        x,
+        end_y,
+    )
+    adb.drag(x, start_y, x, end_y, duration_ms)
     adb.delay(0.5)
 
 
@@ -201,7 +218,7 @@ def wait_sonar_ready(timeout: float | None = None) -> bool:
             probe = find_template(screenshot, path, threshold=0.01)
             if probe is not None and probe.score > best_score:
                 best_score = probe.score
-        sleep(0.5)
+        interruptible_sleep(0.5)
 
     logger.warning(
         "未找到声纳图标（超时 %s 秒，最佳相似度约 %.3f，阈值 %.2f）",
@@ -238,7 +255,7 @@ def advance_from_victory_if_present(timeout: float = 0) -> bool:
             match = find_template(adb.read_screenshot(), config.VICTORY_TEMPLATE)
             if match is not None:
                 break
-            sleep(0.3)
+            interruptible_sleep(0.3)
     else:
         match = find_template(adb.read_screenshot(), config.VICTORY_TEMPLATE)
 
@@ -285,11 +302,11 @@ def wait_activity_detail_ready(timeout: float = 15.0) -> bool:
             if find_template(screenshot, "./template/quit_activity.png") is not None:
                 return True
             # 跳过胜利后可能还要等界面稳定
-            sleep(0.4)
+            interruptible_sleep(0.4)
             continue
         if find_template(screenshot, "./template/quit_activity.png") is not None:
             return True
-        sleep(0.4)
+        interruptible_sleep(0.4)
     logger.warning("等待活动详情就绪超时 (%s 秒)", timeout)
     return False
 
@@ -675,7 +692,6 @@ def prepare_level_detection() -> None:
 
 
 def main(level: int | None = None):
-    clear_stop_request()
     disable_weak_network()
 
     ensure_game_started()

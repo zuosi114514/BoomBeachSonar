@@ -19,6 +19,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--serial", required=True)
     parser.add_argument("--runtime-dir", required=True, type=Path)
     parser.add_argument("--settings", type=Path, default=PROJECT_ROOT / "settings.json")
+    parser.add_argument(
+        "--game-region",
+        choices=("international", "cn"),
+        default="international",
+    )
     parser.add_argument("--manual-level", type=int)
     parser.add_argument("--check-only", action="store_true")
     return parser.parse_args()
@@ -37,6 +42,7 @@ def main() -> int:
     os.environ["BBMA_INSTANCE_ID"] = args.slot
     os.environ["BBMA_ADB_SERIAL"] = args.serial
     os.environ["BBMA_RUNTIME_DIR"] = str(runtime_root)
+    os.environ["BBMA_GAME_REGION"] = args.game_region
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
     os.environ.setdefault("PYTHONUNBUFFERED", "1")
     os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -56,22 +62,35 @@ def main() -> int:
         stop_file=runtime_root / "stop.flag",
     )
     ensure_runtime_dirs(paths)
-    paths.stop_file.unlink(missing_ok=True)
 
     import config
     import main as main_mod
     from utils.logger import get_logger, get_run_elapsed_text, mark_run_start
+    from utils.runtime_context import StopRequestedError
     from utils.user_settings import apply_settings, load_settings
 
     logger = get_logger(f"worker.{args.slot}")
     settings = load_settings(args.settings)
     settings["adb_serial"] = args.serial
+    settings["game_package_name"] = (
+        config.CN_GAME_PACKAGE
+        if args.game_region == "cn"
+        else config.INTERNATIONAL_GAME_PACKAGE
+    )
     apply_settings(settings)
     mark_run_start()
-    _emit_status(args.slot, "starting", serial=args.serial, pid=os.getpid())
+    _emit_status(
+        args.slot,
+        "starting",
+        serial=args.serial,
+        game_region=args.game_region,
+        pid=os.getpid(),
+    )
 
     try:
         main_mod.register_exit_cleanup()
+        if paths.stop_file.exists():
+            raise StopRequestedError("收到总控停止请求")
         adb = main_mod.configure_adb(args.serial)
         adb.ensure_root_shell()
         width, height = adb.get_screenshot_size()
@@ -106,6 +125,15 @@ def main() -> int:
         _emit_status(args.slot, "running", serial=args.serial)
         main_mod.cleanup_reject_network("worker 主流程启动")
         main_mod.main(level)
+        _emit_status(
+            args.slot,
+            "stopped",
+            serial=args.serial,
+            elapsed=get_run_elapsed_text(),
+        )
+        return 0
+    except StopRequestedError:
+        logger.info("收到总控停止请求，worker 正常退出")
         _emit_status(
             args.slot,
             "stopped",

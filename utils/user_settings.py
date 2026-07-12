@@ -92,7 +92,7 @@ SETTING_SCHEMA: list[dict[str, Any]] = [
     },
     {
         "key": "login_wait_timeout",
-        "label": "等待登录按钮超时（秒）",
+        "label": "国服「登陆岛屿」出现等待（秒）",
         "type": "float",
         "group": "等待时间",
     },
@@ -113,6 +113,12 @@ SETTING_SCHEMA: list[dict[str, Any]] = [
         "label": "等待声纳图标超时（秒）",
         "type": "float",
         "group": "等待时间",
+    },
+    {
+        "key": "home_swipe_duration_ms",
+        "label": "重启后主岛上划时长（毫秒）",
+        "type": "float",
+        "group": "流程",
     },
     {
         "key": "reenter_activity_delay",
@@ -169,6 +175,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "game_restart_load_delay": 30.0,
     "sonar_not_found_restart_delay": 15.0,
     "sonar_wait_timeout": 60.0,
+    "home_swipe_duration_ms": 800.0,
     "reenter_activity_delay": 17.0,
     "match_threshold": 0.85,
     "use_saved_points": True,
@@ -180,6 +187,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
             "slot": f"slot{index}",
             "enabled": index == 1,
             "serial": "127.0.0.1:5555" if index == 1 else "",
+            "game_region": "international",
             "manual_level": None,
         }
         for index in range(1, SLOT_COUNT + 1)
@@ -203,6 +211,7 @@ _CONFIG_MAP: dict[str, str] = {
     "game_restart_load_delay": "GAME_RESTART_LOAD_DELAY",
     "sonar_not_found_restart_delay": "SONAR_NOT_FOUND_RESTART_DELAY",
     "sonar_wait_timeout": "SONAR_WAIT_TIMEOUT",
+    "home_swipe_duration_ms": "HOME_SWIPE_DURATION_MS",
     "reenter_activity_delay": "REENTER_ACTIVITY_DELAY",
     "match_threshold": "DEFAULT_MATCH_THRESHOLD",
     "use_saved_points": "USE_SAVED_POINTS",
@@ -263,6 +272,11 @@ def normalize_instances(value: Any) -> list[dict[str, Any]]:
                         "127.0.0.1:5555" if index == 1 else "",
                     )
                 ).strip(),
+                "game_region": (
+                    "cn"
+                    if str(item.get("game_region", "international")).lower() == "cn"
+                    else "international"
+                ),
                 "manual_level": (
                     int(item["manual_level"])
                     if item.get("manual_level") not in (None, "")
@@ -311,6 +325,7 @@ def apply_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             "game_restart_load_delay",
             "sonar_not_found_restart_delay",
             "sonar_wait_timeout",
+            "home_swipe_duration_ms",
             "reenter_activity_delay",
             "match_threshold",
             "hit_click_interval",

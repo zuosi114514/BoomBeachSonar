@@ -5,11 +5,14 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 from utils.runtime_context import (
+    StopRequestedError,
     build_runtime_paths,
+    interruptible_sleep,
     parse_adb_devices_output,
     validate_unique_serials,
 )
@@ -47,17 +50,28 @@ abc unauthorized
             validate_unique_serials(["emulator-5554", "emulator-5554"])
         validate_unique_serials(["emulator-5554", "emulator-5556"])
 
+    def test_worker_delay_is_interrupted_by_stop_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            stop_file = Path(temp_dir) / "stop.flag"
+            stop_file.write_text("stop\n", encoding="utf-8")
+            started = time.monotonic()
+            with self.assertRaises(StopRequestedError):
+                interruptible_sleep(30, stop_file=stop_file)
+            self.assertLess(time.monotonic() - started, 0.5)
+
     def test_settings_preserve_four_instances(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "settings.json"
             settings = load_settings(path)
             settings["instances"][1]["enabled"] = True
             settings["instances"][1]["serial"] = "emulator-5554"
+            settings["instances"][1]["game_region"] = "cn"
             save_settings(settings, path)
 
             saved = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(len(saved["instances"]), 4)
             self.assertEqual(saved["instances"][1]["serial"], "emulator-5554")
+            self.assertEqual(saved["instances"][1]["game_region"], "cn")
 
     def test_config_paths_are_isolated_in_four_processes(self):
         observed: set[tuple[str, str, str]] = set()

@@ -5,12 +5,17 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
 
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+class StopRequestedError(Exception):
+    """总控请求 worker 停止时用于快速退出当前等待。"""
 
 
 @dataclass(frozen=True)
@@ -55,6 +60,33 @@ def configure_worker_environment(slot: str, serial: str, runtime_dir: Path) -> N
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("MKL_NUM_THREADS", "1")
     os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
+
+def get_process_stop_file() -> Path | None:
+    runtime_dir = os.environ.get("BBMA_RUNTIME_DIR", "").strip()
+    return Path(runtime_dir) / "stop.flag" if runtime_dir else None
+
+
+def is_stop_requested(stop_file: Path | None = None) -> bool:
+    target = stop_file if stop_file is not None else get_process_stop_file()
+    return target is not None and target.exists()
+
+
+def interruptible_sleep(
+    seconds: float,
+    *,
+    stop_file: Path | None = None,
+    interval: float = 0.1,
+) -> None:
+    """短周期检查停止文件，避免长延时导致停止/重启失效。"""
+    deadline = time.monotonic() + max(0.0, float(seconds))
+    while True:
+        if is_stop_requested(stop_file):
+            raise StopRequestedError("收到总控停止请求")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(max(0.01, interval), remaining))
 
 
 def parse_adb_devices_output(output: str) -> list[str]:

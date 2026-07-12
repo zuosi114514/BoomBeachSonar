@@ -15,6 +15,7 @@
   "game_restart_load_delay": 30.0,
   "sonar_not_found_restart_delay": 15.0,
   "sonar_wait_timeout": 60.0,
+  "home_swipe_duration_ms": 800.0,
   "reenter_activity_delay": 17.0,
   "match_threshold": 0.85,
   "use_saved_points": true,
@@ -25,25 +26,29 @@
     {
       "slot": "slot1",
       "enabled": true,
-      "serial": "127.0.0.1:5555",
+      "serial": "emulator-5556",
+      "game_region": "international",
       "manual_level": null
     },
     {
       "slot": "slot2",
-      "enabled": false,
-      "serial": "",
+      "enabled": true,
+      "serial": "emulator-5558",
+      "game_region": "international",
       "manual_level": null
     },
     {
       "slot": "slot3",
-      "enabled": false,
-      "serial": "",
+      "enabled": true,
+      "serial": "emulator-5560",
+      "game_region": "international",
       "manual_level": null
     },
     {
       "slot": "slot4",
-      "enabled": false,
-      "serial": "",
+      "enabled": true,
+      "serial": "emulator-5562",
+      "game_region": "international",
       "manual_level": null
     }
   ]
