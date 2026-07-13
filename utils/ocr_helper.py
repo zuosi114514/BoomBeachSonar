@@ -27,11 +27,13 @@ from config import (
     DEFAULT_DETECTED_LEVEL,
     LEVEL_DETECT_DEBUG_DIR,
     LEVEL_DETECT_ENABLED,
+    LEVEL_DETECT_METHOD,
     LEVEL_MATCH_MIN_MARGIN,
     LEVEL_MATCH_ROI,
     LEVEL_MATCH_THRESHOLD,
     LEVEL_REF_DIR,
     LEVEL_TEXT_BINARY_THRESHOLD,
+    MAX_LEVEL,
     OCR_LANGUAGE,
     OCR_LABEL_BLACKLIST,
     OCR_ROI,
@@ -133,8 +135,7 @@ def _extract_number_from_text(text: str) -> Optional[int]:
     
     if not digits:
         return None
-    from config import MAX_LEVEL
-    
+
     # 优先尝试完整数字
     full_number = int(digits)
     if 1 <= full_number <= MAX_LEVEL:
@@ -444,26 +445,115 @@ def _save_level_match_debug(
     return out_dir
 
 
-def match_level_by_template(screenshot: np.ndarray) -> int:
-    """对比标题数字掩膜与 save_points/imgs 参考图，识别关卡号。
+# 数字掩膜 OCR：多尺度 + 正/反色，提升 EasyOCR 对斜体标题数字的命中率
+_LEVEL_OCR_SCALES: tuple[int, ...] = (3, 4, 5, 6)
+_LEVEL_OCR_PAD: int = 20
 
-    只匹配「N号海域」中的数字，忽略倒计时和海浪背景。
-    未匹配或异常时返回 DEFAULT_DETECTED_LEVEL（默认第 14 关）。
+
+def _iter_level_ocr_variants(mask: np.ndarray) -> list[tuple[str, np.ndarray]]:
+    """生成带边距的放大/反色变体，供 EasyOCR 识别。"""
+    variants: list[tuple[str, np.ndarray]] = []
+    for scale in _LEVEL_OCR_SCALES:
+        up = cv2.resize(mask, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
+        for tag, img, pad_val in (
+            (f"x{scale}", up, 0),
+            (f"x{scale}_inv", 255 - up, 255),
+        ):
+            padded = cv2.copyMakeBorder(
+                img,
+                _LEVEL_OCR_PAD,
+                _LEVEL_OCR_PAD,
+                _LEVEL_OCR_PAD,
+                _LEVEL_OCR_PAD,
+                cv2.BORDER_CONSTANT,
+                value=pad_val,
+            )
+            variants.append((tag, padded))
+    return variants
+
+
+def ocr_level_from_digit_mask(screenshot: np.ndarray) -> tuple[int | None, float]:
+    """从标题数字掩膜 OCR 识别关卡号。
+
+    Returns:
+        (level, confidence)；失败时 (None, -1.0)。
+    """
+    if not config_module.OCR_ENABLED:
+        logger.debug("OCR 未启用，跳过关卡数字 OCR")
+        return None, -1.0
+
+    mask = _extract_digit_mask(screenshot)
+    if mask is None:
+        logger.info("标题区未提取到数字掩膜，OCR 无法识别关卡")
+        return None, -1.0
+
+    digit_count = _count_title_digits(screenshot)
+    try:
+        reader = _get_reader()
+    except Exception as exc:
+        logger.warning("初始化 EasyOCR 失败: %s", exc)
+        return None, -1.0
+
+    best: tuple[float, int, str, str] | None = None
+    try:
+        for variant_name, variant in _iter_level_ocr_variants(mask):
+            rgb = cv2.cvtColor(variant, cv2.COLOR_GRAY2RGB)
+            results = reader.readtext(rgb, allowlist="0123456789")
+            for _bbox, text, conf in results:
+                digits = "".join(ch for ch in text if ch.isdigit())
+                if not digits:
+                    continue
+                # 标题数字段数已知时，要求 OCR 位数一致，避免「11」被读成「1」
+                if digit_count > 0 and len(digits) != digit_count:
+                    continue
+                value = int(digits)
+                if not (1 <= value <= MAX_LEVEL):
+                    continue
+                if best is None or conf > best[0]:
+                    best = (float(conf), value, variant_name, text)
+    except Exception as exc:
+        logger.warning("关卡数字 OCR 失败: %s", exc)
+        return None, -1.0
+
+    if best is None:
+        logger.info("关卡数字 OCR 未得到有效结果 (digit_count=%d)", digit_count)
+        return None, -1.0
+
+    conf, level, variant_name, text = best
+    logger.info(
+        "OCR 识别到关卡: %d (置信度: %.3f, variant=%s, raw=%r)",
+        level,
+        conf,
+        variant_name,
+        text,
+    )
+    return level, conf
+
+
+def _match_level_by_template_detailed(
+    screenshot: np.ndarray,
+    *,
+    save_debug: bool = True,
+) -> tuple[int, float, bool, float]:
+    """模板匹配详细结果：(选用关卡, 最高分, 是否达到置信阈值, 分差)。
+
+    未启用/异常时返回 (DEFAULT_DETECTED_LEVEL, -1.0, False, -1.0)。
+    保留此函数供 LEVEL_DETECT_METHOD=template/hybrid 随时恢复使用。
     """
     if not LEVEL_DETECT_ENABLED:
         logger.info("关卡模板匹配未启用，默认第 %d 关", DEFAULT_DETECTED_LEVEL)
-        return DEFAULT_DETECTED_LEVEL
+        return DEFAULT_DETECTED_LEVEL, -1.0, False, -1.0
 
     try:
         refs = _iter_unique_level_refs()
         if not refs:
             logger.warning("无可用参考图，默认第 %d 关", DEFAULT_DETECTED_LEVEL)
-            return DEFAULT_DETECTED_LEVEL
+            return DEFAULT_DETECTED_LEVEL, -1.0, False, -1.0
 
         x1, y1, x2, y2 = _level_match_roi_box(screenshot)
         if x2 <= x1 or y2 <= y1:
             logger.warning("关卡匹配 ROI 无效，默认第 %d 关", DEFAULT_DETECTED_LEVEL)
-            return DEFAULT_DETECTED_LEVEL
+            return DEFAULT_DETECTED_LEVEL, -1.0, False, -1.0
 
         query_digit_count = _count_title_digits(screenshot)
         query_digit = _extract_digit_mask(screenshot)
@@ -473,9 +563,10 @@ def match_level_by_template(screenshot: np.ndarray) -> int:
         }
 
         if query_digit is None or query_digit_count <= 0:
-            _save_level_match_debug(screenshot, x1, y1, x2, y2, query_by_digits)
+            if save_debug:
+                _save_level_match_debug(screenshot, x1, y1, x2, y2, query_by_digits)
             logger.info("标题区未提取到数字掩膜，默认第 %d 关", DEFAULT_DETECTED_LEVEL)
-            return DEFAULT_DETECTED_LEVEL
+            return DEFAULT_DETECTED_LEVEL, -1.0, False, -1.0
 
         scores: list[tuple[float, int]] = []
         best_lvl: int | None = None
@@ -522,24 +613,87 @@ def match_level_by_template(screenshot: np.ndarray) -> int:
                 margin,
             )
 
-        _save_level_match_debug(
-            screenshot,
-            x1,
-            y1,
-            x2,
-            y2,
-            query_by_digits,
-            scores=scores,
-            result_level=result,
-        )
-        return result
+        if save_debug:
+            _save_level_match_debug(
+                screenshot,
+                x1,
+                y1,
+                x2,
+                y2,
+                query_by_digits,
+                scores=scores,
+                result_level=result,
+            )
+        return result, best_score, confident, margin
     except Exception as exc:
         logger.warning("模板匹配失败: %s，默认第 %d 关", exc, DEFAULT_DETECTED_LEVEL)
-        return DEFAULT_DETECTED_LEVEL
+        return DEFAULT_DETECTED_LEVEL, -1.0, False, -1.0
+
+
+def match_level_by_template(screenshot: np.ndarray) -> int:
+    """对比标题数字掩膜与 save_points/imgs 参考图，识别关卡号。
+
+    只匹配「N号海域」中的数字，忽略倒计时和海浪背景。
+    未匹配或异常时返回 DEFAULT_DETECTED_LEVEL（默认第 14 关）。
+    """
+    level, _score, _confident, _margin = _match_level_by_template_detailed(screenshot)
+    return level
 
 
 def detect_activity_level(screenshot: np.ndarray) -> int:
-    """进入活动后识别当前关卡；失败时返回默认关卡。"""
+    """进入活动后识别当前关卡；失败时返回默认关卡。
+
+    方案由 config.LEVEL_DETECT_METHOD 控制：
+      - ocr: 仅 OCR（默认，可识别无参考图的 15+ 关）
+      - template: 仅模板匹配（原方案，改回此项即可恢复）
+      - hybrid: OCR 优先，失败回退模板；冲突取更高置信度
+    """
+    method = str(getattr(config_module, "LEVEL_DETECT_METHOD", LEVEL_DETECT_METHOD)).strip().lower()
+    if method not in {"ocr", "template", "hybrid"}:
+        logger.warning("未知 LEVEL_DETECT_METHOD=%r，回退为 ocr", method)
+        method = "ocr"
+
+    if method == "template":
+        return match_level_by_template(screenshot)
+
+    ocr_level, ocr_conf = ocr_level_from_digit_mask(screenshot)
+
+    if method == "ocr":
+        if ocr_level is not None:
+            return ocr_level
+        logger.info("OCR 未识别关卡，回退默认第 %d 关", DEFAULT_DETECTED_LEVEL)
+        return DEFAULT_DETECTED_LEVEL
+
+    # hybrid
+    if ocr_level is not None:
+        tmpl_level, tmpl_score, tmpl_confident, tmpl_margin = _match_level_by_template_detailed(
+            screenshot, save_debug=False
+        )
+        # 模板分差过小（如 13/14 并列）时不压过 OCR
+        tmpl_reliable = tmpl_confident and tmpl_margin >= LEVEL_MATCH_MIN_MARGIN
+        if not tmpl_reliable:
+            return ocr_level
+        if tmpl_level == ocr_level:
+            return ocr_level
+        if ocr_conf >= tmpl_score:
+            logger.info(
+                "hybrid 冲突：采用 OCR=%d (%.3f) 而非模板=%d (%.3f)",
+                ocr_level,
+                ocr_conf,
+                tmpl_level,
+                tmpl_score,
+            )
+            return ocr_level
+        logger.info(
+            "hybrid 冲突：采用模板=%d (%.3f) 而非 OCR=%d (%.3f)",
+            tmpl_level,
+            tmpl_score,
+            ocr_level,
+            ocr_conf,
+        )
+        return tmpl_level
+
+    logger.info("hybrid：OCR 失败，回退模板匹配")
     return match_level_by_template(screenshot)
 
 

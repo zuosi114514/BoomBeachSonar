@@ -167,6 +167,12 @@ LOGIN_WAIT_TIMEOUT = 10.0
 # 是否在进入活动后自动截图识别关卡
 LEVEL_DETECT_ENABLED: Final[bool] = True
 
+# 关卡识别方案：
+#   "ocr"      - 标题数字掩膜 + EasyOCR（无参考图也能认 15+）
+#   "template" - 原数字掩膜模板匹配（需 save_points/imgs 真图）
+#   "hybrid"   - OCR 优先，失败再回退模板；两者都成功且冲突时取更高置信度
+LEVEL_DETECT_METHOD: Final[str] = "ocr"
+
 # 关卡参考截图目录（文件名如 1.png、10.png）
 LEVEL_REF_DIR: Final[Path] = BASE_DIR / "save_points" / "imgs"
 
