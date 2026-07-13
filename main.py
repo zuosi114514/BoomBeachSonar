@@ -582,33 +582,100 @@ def _find_connected_components(hit_map):
     return components
 
 
-def _ammo_is_empty() -> bool:
-    """读取蓝弹药数量；为 0 返回 True。识别失败时不停止，继续跑。"""
+_ammo_detect_fail_count = 0
+
+
+def _ammo_is_empty() -> tuple[bool, bool]:
+    """读取蓝弹药数量。
+
+    Returns:
+        (empty, failed)
+        - 识别成功：empty = (ammo == 0)，failed = False
+        - 识别失败：empty = True（视为 0 触发领取），failed = True
+    """
     ammo = read_blue_ammo_count(adb.read_screenshot())
     if ammo is None:
         logger.warning(
-            "弹药数量识别失败，继续运行（调试图见 %s）",
+            "弹药数量识别失败，视为 0 去领取（调试图见 %s）",
             config.AMMO_DETECT_DEBUG_DIR,
         )
-        return False
+        return True, True
     logger.info("当前蓝弹药数量: %d", ammo)
-    return ammo == 0
+    return ammo == 0, False
 
 
 def _ensure_ammo_before_probe() -> bool:
-    """每格探测前检查蓝弹药；为 0 则领奖励，仍为 0 则请求停止并返回 False。"""
+    """每格探测前检查蓝弹药；为 0 则领奖励，仍为 0 则请求停止并返回 False。
+
+    识别失败视为 0：联网领取后重新开弱网继续探测；反复失败则停止。
+    """
+    global _ammo_detect_fail_count
     if should_stop():
         return False
-    if not _ammo_is_empty():
+    empty, failed = _ammo_is_empty()
+    if not empty:
+        _ammo_detect_fail_count = 0
         return True
+
+    if failed:
+        _ammo_detect_fail_count += 1
+        logger.warning(
+            "弹药识别失败 %d/%d",
+            _ammo_detect_fail_count,
+            config.AMMO_DETECT_FAIL_LIMIT,
+        )
+        if _ammo_detect_fail_count >= config.AMMO_DETECT_FAIL_LIMIT:
+            logger.error(
+                "弹药识别连续失败 %d 次，停止脚本",
+                _ammo_detect_fail_count,
+            )
+            request_stop()
+            return False
+    else:
+        _ammo_detect_fail_count = 0
 
     logger.warning("探测过程中蓝弹药为 0，尝试领取活动奖励...")
     if _try_refill_or_stop(0):
         request_stop()
         return False
     logger.info("探测中已补充弹药，继续本关")
+    # 领取奖励在联网下完成；恢复探测前必须重新开启弱网保护
     enable_weak_network(0.2)
     return True
+
+
+def _check_ammo_for_round(round_index: int) -> bool:
+    """主循环每关前后检查弹药；为 0 则联网领取，反复识别失败则停止。
+
+    Returns:
+        True = 应停止主循环；False = 可继续下一关。
+    """
+    global _ammo_detect_fail_count
+    empty, failed = _ammo_is_empty()
+    if not empty:
+        _ammo_detect_fail_count = 0
+        return False
+
+    if failed:
+        _ammo_detect_fail_count += 1
+        logger.warning(
+            "弹药识别失败 %d/%d",
+            _ammo_detect_fail_count,
+            config.AMMO_DETECT_FAIL_LIMIT,
+        )
+        if _ammo_detect_fail_count >= config.AMMO_DETECT_FAIL_LIMIT:
+            logger.error(
+                "弹药识别连续失败 %d 次，停止脚本",
+                _ammo_detect_fail_count,
+            )
+            return True
+    else:
+        _ammo_detect_fail_count = 0
+
+    # 视为空 → 联网领取；领取后下一轮会重新识别关卡并由 handle_game_level 开弱网
+    if _try_refill_or_stop(round_index):
+        return True
+    return False
 
 
 def _try_refill_or_stop(round_index: int) -> bool:
@@ -631,7 +698,7 @@ def _try_refill_or_stop(round_index: int) -> bool:
         logger.info("无法打开活动奖励，停止脚本（已完成 %d 轮）", round_index)
         return True
 
-    if _ammo_is_empty():
+    if _ammo_is_empty()[0]:
         logger.info("领取后仍无蓝弹药，真正耗尽，停止脚本（已完成 %d 轮）", round_index)
         return True
 
@@ -713,6 +780,10 @@ def _play_one_level(level: int) -> None:
     logger.info("共 %d 个命中格，开始点击命中格子...", total_hits)
     disable_weak_network(0.2)
     skip_victory_overlay()
+    # 关闭弱网后给界面/网络恢复一点缓冲，再开始统一点击
+    if config.HIT_CLICK_START_DELAY > 0:
+        logger.info("等待 %.1f 秒后开始点击命中格...", config.HIT_CLICK_START_DELAY)
+        adb.delay(config.HIT_CLICK_START_DELAY)
     _click_hits_and_wait_victory(hit_map, grid_size, click_points, total_hits)
 
 
@@ -754,11 +825,9 @@ def main(level: int | None = None):
         round_index += 1
         skip_victory_overlay()
 
-        # 开局 / 每关开始前检查弹药；为 0 则先领奖励，仍为 0 才停
-        if _ammo_is_empty():
-            if _try_refill_or_stop(round_index - 1):
-                break
-            continue
+        # 开局 / 每关开始前检查弹药；为 0 则先领奖励，反复识别失败才停
+        if _check_ammo_for_round(round_index - 1):
+            break
 
         # 必须紧贴关卡截图执行，防止识别旧关卡后胜利界面才延迟出现。
         prepare_level_detection()
@@ -777,11 +846,9 @@ def main(level: int | None = None):
             logger.info("收到停止请求，退出主循环（已完成 %d 轮）", round_index)
             break
 
-        # 关卡结束后再读弹药；为 0 先领奖励
-        if _ammo_is_empty():
-            if _try_refill_or_stop(round_index):
-                break
-            continue
+        # 关卡结束后再读弹药；为 0 先领奖励，反复识别失败才停
+        if _check_ammo_for_round(round_index):
+            break
         logger.info("弹药仍有剩余，继续下一关...")
 
 

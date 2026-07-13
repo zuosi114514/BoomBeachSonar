@@ -265,6 +265,13 @@ REWARD_CLAIM_MAX_ROUNDS = 15
 # 探测完成后逐个点击命中格之间的间隔（秒）
 HIT_CLICK_INTERVAL = 1.0
 
+# 探测完成、关闭弱网后，开始统一点击命中格前的等待（秒）
+# 给游戏界面/网络恢复一点缓冲，避免首击落空
+HIT_CLICK_START_DELAY = 1.0
+
+# 弹药识别连续失败多少次后停止脚本（识别失败视为 0 触发领取，反复失败才停）
+AMMO_DETECT_FAIL_LIMIT = 3
+
 # 弹药为 0 时是否尝试领取活动奖励
 CLAIM_REWARDS_WHEN_AMMO_EMPTY = True
 

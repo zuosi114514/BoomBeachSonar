@@ -177,7 +177,7 @@ class MainFlowTest(unittest.TestCase):
         """领取奖励前必须关闭弱网并清理 REJECT 断网。"""
         with patch.object(self.main, "skip_victory_overlay", return_value=False):
             with patch.object(self.main, "refill_ammo_from_rewards", return_value=True):
-                with patch.object(self.main, "_ammo_is_empty", return_value=False):
+                with patch.object(self.main, "_ammo_is_empty", return_value=(False, False)):
                     should_stop = self.main._try_refill_or_stop(1)
 
         package_name = self.main.config.GAME_PACKAGE_NAME
@@ -188,13 +188,38 @@ class MainFlowTest(unittest.TestCase):
     def test_ensure_ammo_before_probe_reenables_weak_network_after_refill(self):
         """探测中补充弹药后应重新开启弱网，避免下一格真实消耗弹药。"""
         with patch.object(self.main, "should_stop", return_value=False):
-            with patch.object(self.main, "_ammo_is_empty", side_effect=[True, False]):
+            with patch.object(self.main, "_ammo_is_empty", side_effect=[(True, False), (False, False)]):
                 with patch.object(self.main, "_try_refill_or_stop", return_value=False):
                     can_probe = self.main._ensure_ammo_before_probe()
 
         package_name = self.main.config.GAME_PACKAGE_NAME
         self.assertTrue(can_probe)
         self.assertIn(("enable_weak_network", package_name), self.adb.calls)
+
+    def test_repeated_ammo_detect_failure_stops_in_probe(self):
+        """探测中弹药识别连续失败达到上限应请求停止。"""
+        limit = self.main.config.AMMO_DETECT_FAIL_LIMIT
+        self.main._ammo_detect_fail_count = 0
+        with patch.object(self.main, "should_stop", return_value=False):
+            with patch.object(self.main, "_ammo_is_empty", return_value=(True, True)):
+                with patch.object(self.main, "_try_refill_or_stop", return_value=False):
+                    with patch.object(self.main, "request_stop") as request_stop:
+                        results = [
+                            self.main._ensure_ammo_before_probe()
+                            for _ in range(limit)
+                        ]
+
+        self.assertFalse(results[-1])
+        request_stop.assert_called()
+
+    def test_repeated_ammo_detect_failure_stops_main_loop(self):
+        """主循环中弹药识别连续失败达到上限应停止主循环。"""
+        limit = self.main.config.AMMO_DETECT_FAIL_LIMIT
+        self.main._ammo_detect_fail_count = 0
+        with patch.object(self.main, "_ammo_is_empty", return_value=(True, True)):
+            stops = [self.main._check_ammo_for_round(0) for _ in range(limit)]
+
+        self.assertTrue(stops[-1])
 
     def test_click_hits_retries_when_victory_missing(self):
         """首次点击后未出现胜利界面时，应重试统一点击一次。"""
