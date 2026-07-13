@@ -448,7 +448,7 @@ def match_level_by_template(screenshot: np.ndarray) -> int:
     """对比标题数字掩膜与 save_points/imgs 参考图，识别关卡号。
 
     只匹配「N号海域」中的数字，忽略倒计时和海浪背景。
-    未匹配或异常时返回 DEFAULT_DETECTED_LEVEL（默认第 10 关）。
+    未匹配或异常时返回 DEFAULT_DETECTED_LEVEL（默认第 14 关）。
     """
     if not LEVEL_DETECT_ENABLED:
         logger.info("关卡模板匹配未启用，默认第 %d 关", DEFAULT_DETECTED_LEVEL)

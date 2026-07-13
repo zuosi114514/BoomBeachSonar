@@ -55,7 +55,7 @@ class LevelTemplateMatchTest(unittest.TestCase):
         self.assertEqual(detected, 2)
 
     def test_unmatched_returns_default_level(self):
-        """纯色图无法匹配时，应回退到默认第 10 关。"""
+        """纯色图无法匹配时，应回退到默认第 14 关。"""
         blank = np.zeros((720, 1280, 3), dtype=np.uint8)
         detected = match_level_by_template(blank)
         self.assertEqual(detected, DEFAULT_DETECTED_LEVEL)

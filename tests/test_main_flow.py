@@ -173,6 +173,29 @@ class MainFlowTest(unittest.TestCase):
         self.assertTrue(ready)
         skip.assert_called()
 
+    def test_try_refill_restores_full_network_before_claiming(self):
+        """领取奖励前必须关闭弱网并清理 REJECT 断网。"""
+        with patch.object(self.main, "skip_victory_overlay", return_value=False):
+            with patch.object(self.main, "refill_ammo_from_rewards", return_value=True):
+                with patch.object(self.main, "_ammo_is_empty", return_value=False):
+                    should_stop = self.main._try_refill_or_stop(1)
+
+        package_name = self.main.config.GAME_PACKAGE_NAME
+        self.assertFalse(should_stop)
+        self.assertIn(("disable_weak_network", package_name), self.adb.calls)
+        self.assertIn(("disable_reject_network", package_name), self.adb.calls)
+
+    def test_ensure_ammo_before_probe_reenables_weak_network_after_refill(self):
+        """探测中补充弹药后应重新开启弱网，避免下一格真实消耗弹药。"""
+        with patch.object(self.main, "should_stop", return_value=False):
+            with patch.object(self.main, "_ammo_is_empty", side_effect=[True, False]):
+                with patch.object(self.main, "_try_refill_or_stop", return_value=False):
+                    can_probe = self.main._ensure_ammo_before_probe()
+
+        package_name = self.main.config.GAME_PACKAGE_NAME
+        self.assertTrue(can_probe)
+        self.assertIn(("enable_weak_network", package_name), self.adb.calls)
+
     def test_click_hits_retries_when_victory_missing(self):
         """首次点击后未出现胜利界面时，应重试统一点击一次。"""
         hit_map = [[1, 0], [0, 1]]

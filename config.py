@@ -192,7 +192,7 @@ LEVEL_TEXT_BINARY_THRESHOLD: Final[int] = 195
 LEVEL_DETECT_DEBUG_DIR: Final[Path] = SCREENSHOT_DIR / "level_detect"
 
 # 未识别出关卡时的默认关卡号
-DEFAULT_DETECTED_LEVEL: Final[int] = 10
+DEFAULT_DETECTED_LEVEL: Final[int] = 14
 
 # ============================================================
 # OCR 关卡数字识别配置

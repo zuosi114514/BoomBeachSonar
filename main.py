@@ -607,6 +607,7 @@ def _ensure_ammo_before_probe() -> bool:
         request_stop()
         return False
     logger.info("探测中已补充弹药，继续本关")
+    enable_weak_network(0.2)
     return True
 
 
@@ -621,7 +622,9 @@ def _try_refill_or_stop(round_index: int) -> bool:
         return True
 
     logger.info("蓝弹药为 0，尝试领取活动奖励补充弹药...")
+    # 领取奖励必须恢复完整联网：关闭 DROP 弱网并清理 REJECT 断网残留。
     disable_weak_network(0.2)
+    cleanup_reject_network("领取活动奖励前")
     skip_victory_overlay()
     opened = refill_ammo_from_rewards(adb)
     if not opened:
