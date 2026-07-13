@@ -259,6 +259,9 @@ REWARD_PANEL_Y1_PCT = 0.20
 REWARD_PANEL_X2_PCT = 0.77
 REWARD_PANEL_Y2_PCT = 0.82
 
+# 点击潜艇入口后等待奖励界面出现的固定延时（秒），不再做界面识别
+REWARD_PANEL_OPEN_DELAY = 1.5
+
 # 单次打开奖励界面最多领取轮数
 REWARD_CLAIM_MAX_ROUNDS = 15
 

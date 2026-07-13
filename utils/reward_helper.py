@@ -14,7 +14,6 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-REWARD_TITLE_TEMPLATE = "./template/reward_title.png"
 REWARD_CLOSE_TEMPLATE = "./template/reward_close.png"
 SUB_REWARD_BTN_TEMPLATE = "./template/sub_reward_btn.png"
 
@@ -109,12 +108,8 @@ def find_reward_icon_points(screenshot: np.ndarray) -> list[tuple[int, int, str]
     return results
 
 
-def is_reward_panel_open(screenshot: np.ndarray) -> bool:
-    return find_template(screenshot, REWARD_TITLE_TEMPLATE, threshold=0.75) is not None
-
-
 def open_reward_panel(adb) -> bool:
-    """点击左下角潜艇进度条，打开活动奖励。"""
+    """点击左下角潜艇进度条，延时后视为奖励界面已打开（不做界面识别）。"""
     screenshot = adb.read_screenshot()
     match = find_template(screenshot, SUB_REWARD_BTN_TEMPLATE, threshold=0.75)
     if match is not None:
@@ -125,18 +120,11 @@ def open_reward_panel(adb) -> bool:
 
     logger.info("点击左下角潜艇奖励入口: (%s, %s)", x, y)
     adb.delay(0.3).click(x, y)
-    adb.delay(1.0)
-
-    for _ in range(10):
-        shot = adb.read_screenshot()
-        if is_reward_panel_open(shot):
-            _save_reward_debug(shot, "panel_open")
-            logger.info("活动奖励界面已打开")
-            return True
-        adb.delay(0.4)
-    logger.warning("点击潜艇后未出现活动奖励界面")
-    _save_reward_debug(adb.read_screenshot(), "panel_open_fail")
-    return False
+    delay = float(getattr(config, "REWARD_PANEL_OPEN_DELAY", 1.5))
+    logger.info("等待奖励界面出现 %.1fs（不做识别）", delay)
+    adb.delay(delay)
+    _save_reward_debug(adb.read_screenshot(), "panel_open")
+    return True
 
 
 def close_reward_panel(adb) -> None:
@@ -159,13 +147,9 @@ def claim_visible_rewards(adb, max_rounds: int | None = None) -> int:
     clicks = 0
     for round_index in range(1, max_rounds + 1):
         screenshot = adb.read_screenshot()
-        if not is_reward_panel_open(screenshot):
-            logger.warning("奖励界面已关闭，停止领取 round=%d", round_index)
-            break
-
         points = find_claimable_reward_points(screenshot)
         if not points:
-            logger.info("没有更多可领取奖励")
+            logger.info("没有更多可领取奖励 round=%d", round_index)
             break
 
         for x, y in points:
